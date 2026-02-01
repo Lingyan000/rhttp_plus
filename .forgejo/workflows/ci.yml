@@ -13,15 +13,13 @@ env:
 jobs:
   test:
     name: Test (newest Flutter version)
-    runs-on: codeberg-small
+    runs-on: self-hosted
+
+    container:
+      image: ghcr.io/cirruslabs/flutter:${{ env.FLUTTER_VERSION_NEWEST }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: ./.forgejo/actions/setup-flutter
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION_NEWEST }}
+      - uses: https://codeberg.org/Tienisto/checkout@v0.1.0
 
       - name: Dependencies
         working-directory: rhttp
@@ -41,15 +39,13 @@ jobs:
 
   test_legacy:
     name: Test (oldest Flutter version)
-    runs-on: codeberg-small
+    runs-on: self-hosted
+
+    container:
+      image: ghcr.io/cirruslabs/flutter:${{ env.FLUTTER_VERSION_OLDEST }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: ./.forgejo/actions/setup-flutter
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION_OLDEST }}
+      - uses: https://codeberg.org/Tienisto/checkout@v0.1.0
 
       - name: Remove example
         working-directory: rhttp
