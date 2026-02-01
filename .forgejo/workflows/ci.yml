@@ -10,6 +10,10 @@ env:
   FLUTTER_VERSION_OLDEST: "3.35.7"
   FLUTTER_VERSION_NEWEST: "3.38.9"
 
+defaults:
+  run:
+    working-directory: rhttp
+
 jobs:
   test:
     name: Test (newest Flutter version)
@@ -22,19 +26,15 @@ jobs:
       - uses: https://codeberg.org/Tienisto/checkout@v0.1.0
 
       - name: Dependencies
-        working-directory: rhttp
         run: flutter pub get
 
       - name: Check format
-        working-directory: rhttp
         run: dart format --set-exit-if-changed lib bin test
 
       - name: Analyze
-        working-directory: rhttp
         run: flutter analyze
 
       - name: Test
-        working-directory: rhttp
         run: flutter test
 
   test_legacy:
@@ -48,13 +48,10 @@ jobs:
       - uses: https://codeberg.org/Tienisto/checkout@v0.1.0
 
       - name: Remove example
-        working-directory: rhttp
         run: rm -rf example
 
       - name: Downgrade
-        working-directory: rhttp
         run: flutter pub downgrade
 
       - name: Test
-        working-directory: rhttp
         run: flutter test
