@@ -1,10 +1,10 @@
-# rhttp
+# rhttp_plus
 
-[![pub package](https://img.shields.io/pub/v/rhttp.svg)](https://pub.dev/packages/rhttp)
-![ci](https://codeberg.org/Tienisto/rhttp/actions/workflows/ci.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Make HTTP requests using Rust for Flutter developers.
+
+> **Note:** This project is forked from [rhttp](https://codeberg.org/Tienisto/rhttp), with added **ECH (Encrypted Client Hello)** support.
 
 ## About
 
@@ -24,6 +24,7 @@ Web is currently not supported.
 ## Features
 
 - ✅ HTTP/1, HTTP/1.1, HTTP/2, and HTTP/3 support
+- ✅ ECH (Encrypted Client Hello) support
 - ✅ TLS 1.2 and 1.3 support
 - ✅ Connection pooling
 - ✅ Interceptors
@@ -68,6 +69,7 @@ Checkout the benchmark code [here](https://github.com/Tienisto/rhttp/tree/main/b
   - [HTTP version](#-http-version)
   - [TLS version](#-tls-version)
   - [TLS Server Name Indication (SNI)](#-tls-server-name-indication-sni)
+  - [Encrypted Client Hello (ECH)](#-encrypted-client-hello-ech)
   - [Certificate Pinning](#-certificate-pinning)
   - [Disable pre-installed root certificates](#-disable-pre-installed-root-certificates)
   - [Client Authentication](#-client-authentication--mutual-tls)
@@ -465,6 +467,42 @@ await Rhttp.get(
   settings: const ClientSettings(
     tlsSettings: TlsSettings(
       sni: false,
+    ),
+  ),
+);
+```
+
+### ➤ Encrypted Client Hello (ECH)
+
+ECH encrypts the TLS ClientHello message (including the SNI) to prevent middleboxes from seeing which server you're connecting to.
+
+ECH requires TLS 1.3 (enforced automatically when ECH is enabled).
+
+**With ECH config from DNS HTTPS records:**
+
+```dart
+// echConfigList is the raw bytes from the DNS HTTPS record's ech parameter
+await Rhttp.get(
+  'https://example.com',
+  settings: ClientSettings(
+    tlsSettings: TlsSettings(
+      echConfigList: echConfigListBytes, // Uint8List
+    ),
+  ),
+);
+```
+
+**ECH GREASE (anti-ossification):**
+
+When no ECH config is available, you can enable GREASE to send a fake ECH extension,
+helping to prevent middleboxes from ossifying against ECH.
+
+```dart
+await Rhttp.get(
+  'https://example.com',
+  settings: const ClientSettings(
+    tlsSettings: TlsSettings(
+      echGrease: true,
     ),
   ),
 );

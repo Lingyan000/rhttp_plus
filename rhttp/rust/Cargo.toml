@@ -12,6 +12,9 @@ flutter_rust_bridge = { version = "=2.11.1", features = ["chrono"] }
 futures-util = "0.3.31"
 tokio = { version = "1.48.0", features = ["full"] }
 tokio-util = "0.7.17"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
 
 [dependencies.reqwest]
 version = "0.12.25"

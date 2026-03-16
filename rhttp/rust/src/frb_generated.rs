@@ -1424,6 +1424,17 @@ impl SseDecode for Option<crate::api::client::TlsVersion> {
     }
 }
 
+impl SseDecode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<u8>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<Vec<(String, String)>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1606,6 +1617,8 @@ impl SseDecode for crate::api::client::TlsSettings {
         let mut var_maxTlsVersion =
             <Option<crate::api::client::TlsVersion>>::sse_decode(deserializer);
         let mut var_sni = <bool>::sse_decode(deserializer);
+        let mut var_echConfigList = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_echGrease = <bool>::sse_decode(deserializer);
         return crate::api::client::TlsSettings {
             trust_root_certificates: var_trustRootCertificates,
             trusted_root_certificates: var_trustedRootCertificates,
@@ -1614,6 +1627,8 @@ impl SseDecode for crate::api::client::TlsSettings {
             min_tls_version: var_minTlsVersion,
             max_tls_version: var_maxTlsVersion,
             sni: var_sni,
+            ech_config_list: var_echConfigList,
+            ech_grease: var_echGrease,
         };
     }
 }
@@ -2311,6 +2326,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::client::TlsSettings {
             self.min_tls_version.into_into_dart().into_dart(),
             self.max_tls_version.into_into_dart().into_dart(),
             self.sni.into_into_dart().into_dart(),
+            self.ech_config_list.into_into_dart().into_dart(),
+            self.ech_grease.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2983,6 +3000,16 @@ impl SseEncode for Option<crate::api::client::TlsVersion> {
     }
 }
 
+impl SseEncode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<u8>>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<Vec<(String, String)>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3147,6 +3174,8 @@ impl SseEncode for crate::api::client::TlsSettings {
         <Option<crate::api::client::TlsVersion>>::sse_encode(self.min_tls_version, serializer);
         <Option<crate::api::client::TlsVersion>>::sse_encode(self.max_tls_version, serializer);
         <bool>::sse_encode(self.sni, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.ech_config_list, serializer);
+        <bool>::sse_encode(self.ech_grease, serializer);
     }
 }
 

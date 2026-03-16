@@ -1634,6 +1634,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
+  }
+
+  @protected
   List<(String, String)>? dco_decode_opt_list_record_string_string(
     dynamic raw,
   ) {
@@ -1784,8 +1790,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TlsSettings dco_decode_tls_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return TlsSettings(
       trustRootCertificates: dco_decode_bool(arr[0]),
       trustedRootCertificates: dco_decode_list_list_prim_u_8_strict(arr[1]),
@@ -1794,6 +1800,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       minTlsVersion: dco_decode_opt_box_autoadd_tls_version(arr[4]),
       maxTlsVersion: dco_decode_opt_box_autoadd_tls_version(arr[5]),
       sni: dco_decode_bool(arr[6]),
+      echConfigList: dco_decode_opt_list_prim_u_8_strict(arr[7]),
+      echGrease: dco_decode_bool(arr[8]),
     );
   }
 
@@ -2715,6 +2723,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_prim_u_8_strict(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   List<(String, String)>? sse_decode_opt_list_record_string_string(
     SseDeserializer deserializer,
   ) {
@@ -2899,6 +2918,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_sni = sse_decode_bool(deserializer);
+    var var_echConfigList = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_echGrease = sse_decode_bool(deserializer);
     return TlsSettings(
       trustRootCertificates: var_trustRootCertificates,
       trustedRootCertificates: var_trustedRootCertificates,
@@ -2907,6 +2928,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       minTlsVersion: var_minTlsVersion,
       maxTlsVersion: var_maxTlsVersion,
       sni: var_sni,
+      echConfigList: var_echConfigList,
+      echGrease: var_echGrease,
     );
   }
 
@@ -3911,6 +3934,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_prim_u_8_strict(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_list_record_string_string(
     List<(String, String)>? self,
     SseSerializer serializer,
@@ -4078,6 +4114,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_tls_version(self.minTlsVersion, serializer);
     sse_encode_opt_box_autoadd_tls_version(self.maxTlsVersion, serializer);
     sse_encode_bool(self.sni, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.echConfigList, serializer);
+    sse_encode_bool(self.echGrease, serializer);
   }
 
   @protected

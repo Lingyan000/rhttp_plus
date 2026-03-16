@@ -250,6 +250,16 @@ class TlsSettings {
   /// Enable TLS Server Name Indication (SNI).
   final bool sni;
 
+  /// The ECH config list bytes, typically obtained from DNS HTTPS records.
+  /// When set, Encrypted Client Hello (ECH) will be enabled.
+  /// ECH requires TLS 1.3 (enforced automatically).
+  final Uint8List? echConfigList;
+
+  /// Enable ECH GREASE (anti-ossification) when no ECH config is available.
+  /// This sends a fake ECH extension to prevent middleboxes from ossifying.
+  /// Ignored if [echConfigList] is set.
+  final bool echGrease;
+
   const TlsSettings({
     this.trustRootCertificates = true,
     this.trustedRootCertificates = const [],
@@ -258,6 +268,8 @@ class TlsSettings {
     this.minTlsVersion,
     this.maxTlsVersion,
     this.sni = true,
+    this.echConfigList,
+    this.echGrease = false,
   });
 }
 
@@ -441,6 +453,8 @@ extension on TlsSettings {
       minTlsVersion: minTlsVersion,
       maxTlsVersion: maxTlsVersion,
       sni: sni,
+      echConfigList: echConfigList,
+      echGrease: echGrease,
     );
   }
 }

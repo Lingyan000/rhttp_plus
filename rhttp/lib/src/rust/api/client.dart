@@ -10,8 +10,8 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'client.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `create_client`, `new_default`, `new`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DynamicDnsSettings`, `DynamicResolver`, `StaticResolver`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `resolve`, `resolve`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DynamicDnsSettings`, `DynamicResolver`, `EchNoCertVerifier`, `StaticResolver`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `resolve`, `resolve`, `supported_verify_schemes`, `verify_server_cert`, `verify_tls12_signature`, `verify_tls13_signature`
 
 DnsSettings createStaticResolverSync({required StaticDnsSettings settings}) =>
     RustLib.instance.api.crateApiClientCreateStaticResolverSync(
@@ -217,6 +217,12 @@ class TlsSettings {
   final TlsVersion? maxTlsVersion;
   final bool sni;
 
+  /// ECH config list bytes, typically obtained from DNS HTTPS records.
+  final Uint8List? echConfigList;
+
+  /// Enable ECH GREASE when no ECH config is available.
+  final bool echGrease;
+
   const TlsSettings({
     required this.trustRootCertificates,
     required this.trustedRootCertificates,
@@ -225,6 +231,8 @@ class TlsSettings {
     this.minTlsVersion,
     this.maxTlsVersion,
     required this.sni,
+    this.echConfigList,
+    required this.echGrease,
   });
 
   @override
@@ -235,7 +243,9 @@ class TlsSettings {
       clientCertificate.hashCode ^
       minTlsVersion.hashCode ^
       maxTlsVersion.hashCode ^
-      sni.hashCode;
+      sni.hashCode ^
+      echConfigList.hashCode ^
+      echGrease.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -248,7 +258,9 @@ class TlsSettings {
           clientCertificate == other.clientCertificate &&
           minTlsVersion == other.minTlsVersion &&
           maxTlsVersion == other.maxTlsVersion &&
-          sni == other.sni;
+          sni == other.sni &&
+          echConfigList == other.echConfigList &&
+          echGrease == other.echGrease;
 }
 
 enum TlsVersion { tls12, tls13 }
