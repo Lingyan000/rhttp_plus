@@ -249,11 +249,13 @@ pub async fn make_http_request_receive_stream(
 
     tokio::select! {
         _ = cancel_tokens.request_cancel_token.cancelled() => {
-            let _ = stream_sink.add_error(anyhow::anyhow!(error::STREAM_CANCEL_ERROR));
+            // 不往 stream_sink 发送 error：Dart 端可能已 dispose，
+            // 往已关闭的 sink 写入会导致 flutter_rust_bridge SIGABRT。
+            // 但仍需调用 on_error 通知 Dart 端 responseCompleter 完成，
+            // 否则 await responseCompleter.future 会永远挂起。
             on_error(RhttpError::RhttpCancelError).await;
         },
         _ = cancel_tokens.client_cancel_token.cancelled() => {
-            let _ = stream_sink.add_error(anyhow::anyhow!(error::STREAM_CANCEL_ERROR));
             on_error(RhttpError::RhttpCancelError).await;
         },
         _ = make_http_request_receive_stream_inner(
@@ -327,11 +329,11 @@ async fn make_http_request_receive_stream_inner(
             return;
         }
 
-        let result = stream_sink.add(chunk.unwrap().to_vec()).inspect_err(|e| {
-            let _ = stream_sink.add_error(anyhow::anyhow!(e.to_string()));
-        });
+        let result = stream_sink.add(chunk.unwrap().to_vec());
 
         if result.is_err() {
+            // sink 已关闭（Dart 端取消了 Stream），直接退出，
+            // 不再尝试 add_error，避免往已关闭的 sink 二次写入导致 SIGABRT
             return;
         }
     }

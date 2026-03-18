@@ -130,6 +130,10 @@ Future<HttpResponse> requestInternalGeneric(HttpRequest request) async {
     if (request.expectBody == HttpExpectBody.stream) {
       final cancelRefCompleter = Completer<rust_lib.CancellationToken>();
       final responseCompleter = Completer<rust.HttpResponse>();
+      // 追踪 body 流传输期间是否被取消。
+      // Rust 端取消时不再往 stream_sink 发送 STREAM_CANCEL_ERROR（避免 SIGABRT），
+      // 改由 on_error 回调设置此标志，handleDone 中补偿发出 RhttpCancelException。
+      var cancelledDuringBody = false;
       Stream<Uint8List> stream = rust.makeHttpRequestReceiveStream(
         client: request.client?.ref,
         settings: request.settings?.toRustType(),
@@ -149,6 +153,10 @@ Future<HttpResponse> requestInternalGeneric(HttpRequest request) async {
         onError: (e) {
           if (!responseCompleter.isCompleted) {
             responseCompleter.completeError(e);
+          } else {
+            // headers 已收到、body 流传输中被取消：标记状态，
+            // stream 关闭时由 handleDone 补偿发出取消异常
+            cancelledDuringBody = true;
           }
         },
         onCancelToken: (cancelRef) => cancelRefCompleter.complete(cancelRef),
@@ -190,6 +198,7 @@ Future<HttpResponse> requestInternalGeneric(HttpRequest request) async {
               }
               profileByteStream?.close();
             },
+            isCancelledDuringBody: () => cancelledDuringBody,
           ),
         );
       } else {
@@ -200,6 +209,7 @@ Future<HttpResponse> requestInternalGeneric(HttpRequest request) async {
                 ? null
                 : (chunk) => profileByteStream.addBytes(chunk),
             onDone: profileByteStream?.close,
+            isCancelledDuringBody: () => cancelledDuringBody,
           ),
         );
       }
@@ -465,6 +475,7 @@ StreamTransformer<Uint8List, Uint8List> _createStreamTransformer({
   required HttpRequest request,
   void Function(Uint8List chunk)? onData,
   void Function()? onDone,
+  bool Function()? isCancelledDuringBody,
 }) {
   return StreamTransformer<Uint8List, Uint8List>.fromHandlers(
     handleData: onData == null
@@ -473,12 +484,16 @@ StreamTransformer<Uint8List, Uint8List> _createStreamTransformer({
             onData(data);
             sink.add(data);
           },
-    handleDone: onDone == null
-        ? null
-        : (sink) {
-            onDone();
-            sink.close();
-          },
+    handleDone: (sink) {
+      onDone?.call();
+      // Rust 端取消时不再通过 stream_sink 发送 STREAM_CANCEL_ERROR（避免 SIGABRT），
+      // 而是通过 on_error 回调设置标志。此处检测到取消后补偿发出取消异常，
+      // 确保 Stream 消费者能区分「正常结束」和「被取消」。
+      if (isCancelledDuringBody?.call() ?? false) {
+        sink.addError(RhttpCancelException(request));
+      }
+      sink.close();
+    },
     handleError: (error, stackTrace, sink) {
       final mappedError = switch (error) {
         // Flutter Rust Bridge currently always throws AnyhowException
