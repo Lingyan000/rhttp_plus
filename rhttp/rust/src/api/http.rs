@@ -247,63 +247,34 @@ pub async fn make_http_request_receive_stream(
         on_cancel_token(cancel_tokens.request_cancel_token.clone()).await;
     }
 
-    tokio::select! {
+    // Phase 1: HTTP 请求阶段 — 可以安全使用 select!（没有 Dart 回调在执行）
+    let response = tokio::select! {
         _ = cancel_tokens.request_cancel_token.cancelled() => {
-            // 不往 stream_sink 发送 error：Dart 端可能已 dispose，
-            // 往已关闭的 sink 写入会导致 flutter_rust_bridge SIGABRT。
-            // 但仍需调用 on_error 通知 Dart 端 responseCompleter 完成，
-            // 否则 await responseCompleter.future 会永远挂起。
             on_error(RhttpError::RhttpCancelError).await;
+            return;
         },
         _ = cancel_tokens.client_cancel_token.cancelled() => {
             on_error(RhttpError::RhttpCancelError).await;
+            return;
         },
-        _ = make_http_request_receive_stream_inner(
+        response = make_http_request_helper(
             client,
             settings,
             method,
-            url.to_owned(),
+            url,
             query,
             headers,
             body,
             body_stream,
-            stream_sink.clone(),
-            on_response,
-            &on_error,
-        ) => {},
-    }
-}
+            None,
+        ) => response,
+    };
 
-async fn make_http_request_receive_stream_inner(
-    client: Option<RustAutoOpaque<RequestClient>>,
-    settings: Option<ClientSettings>,
-    method: HttpMethod,
-    url: String,
-    query: Option<Vec<(String, String)>>,
-    headers: Option<HttpHeaders>,
-    body: Option<HttpBody>,
-    body_stream: Option<stream::Dart2RustStreamReceiver>,
-    stream_sink: StreamSink<Vec<u8>>,
-    on_response: impl Fn(HttpResponse) -> DartFnFuture<()>,
-    on_error: &impl Fn(RhttpError) -> DartFnFuture<()>,
-) {
-    let response = make_http_request_helper(
-        client,
-        settings,
-        method,
-        url,
-        query,
-        headers,
-        body,
-        body_stream,
-        None,
-    )
-    .await;
-
+    // Phase 2: 响应处理 — Dart 回调不在 select! 内，不会被意外丢弃
     let response: Response = match response {
         Ok(res) => res,
         Err(e) => {
-            on_error(e.clone()).await;
+            on_error(e).await;
             return;
         }
     };
@@ -318,23 +289,33 @@ async fn make_http_request_receive_stream_inner(
 
     on_response(http_response).await;
 
+    // Phase 3: 流式读取 — select! 仅包裹 stream.next()，不涉及 Dart 回调
     let mut stream = response.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.inspect_err(|e| {
-            let _ = stream_sink.add_error(anyhow::anyhow!(e.to_string()));
-        });
+    loop {
+        let chunk = tokio::select! {
+            _ = cancel_tokens.request_cancel_token.cancelled() => {
+                let _ = stream_sink.add_error(anyhow::anyhow!(error::STREAM_CANCEL_ERROR));
+                return;
+            },
+            _ = cancel_tokens.client_cancel_token.cancelled() => {
+                let _ = stream_sink.add_error(anyhow::anyhow!(error::STREAM_CANCEL_ERROR));
+                return;
+            },
+            chunk = stream.next() => chunk,
+        };
 
-        if chunk.is_err() {
-            return;
-        }
-
-        let result = stream_sink.add(chunk.unwrap().to_vec());
-
-        if result.is_err() {
-            // sink 已关闭（Dart 端取消了 Stream），直接退出，
-            // 不再尝试 add_error，避免往已关闭的 sink 二次写入导致 SIGABRT
-            return;
+        match chunk {
+            None => return,
+            Some(Err(e)) => {
+                let _ = stream_sink.add_error(anyhow::anyhow!(e.to_string()));
+                return;
+            }
+            Some(Ok(data)) => {
+                if stream_sink.add(data.to_vec()).is_err() {
+                    return;
+                }
+            }
         }
     }
 }
