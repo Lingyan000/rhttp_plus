@@ -1,3 +1,8 @@
+## 0.16.0
+
+- deps: bump `flutter_rust_bridge` to `2.12.0`
+- deps: bump Rust dependencies to latest versions
+
 ## 0.15.1
 
 - chore: migrate from GitHub to Codeberg: https://codeberg.org/Tienisto/rhttp
