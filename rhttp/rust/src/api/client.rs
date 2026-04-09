@@ -5,6 +5,7 @@ use chrono::Duration;
 use flutter_rust_bridge::{frb, DartFnFuture};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::{tls, Certificate};
+use rustls::CipherSuite;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -207,8 +208,11 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
 
             if ech_enabled {
                 // Build rustls::ClientConfig manually with ECH support
-                let provider =
-                    Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+                let mut base_provider = rustls::crypto::aws_lc_rs::default_provider();
+                // cipher suite 顺序对齐 Chrome/BoringSSL，降低被 CF Bot Management 标记的风险
+                base_provider.cipher_suites =
+                    reorder_cipher_suites_chrome_style(base_provider.cipher_suites);
+                let provider = Arc::new(base_provider);
 
                 let ech_mode = if let Some(ref config_list) = tls_settings.ech_config_list {
                     let ech_config = rustls::client::EchConfig::new(
@@ -318,53 +322,92 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
                 client = client.use_preconfigured_tls(tls_config);
             } else {
                 // Standard TLS configuration (no ECH)
-                if !tls_settings.trust_root_certificates {
-                    client = client.tls_built_in_root_certs(false);
+                // 使用 use_preconfigured_tls 以自定义 cipher suite 顺序（对齐 Chrome）
+                let mut base_provider = rustls::crypto::ring::default_provider();
+                base_provider.cipher_suites =
+                    reorder_cipher_suites_chrome_style(base_provider.cipher_suites);
+
+                let mut root_store = rustls::RootCertStore::empty();
+                if tls_settings.trust_root_certificates {
+                    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                }
+                for cert_pem in &tls_settings.trusted_root_certificates {
+                    for cert in rustls_pemfile::certs(&mut cert_pem.as_slice()) {
+                        match cert {
+                            Ok(c) => {
+                                root_store.add(c).map_err(|e| {
+                                    RhttpError::RhttpUnknownError(format!(
+                                        "Error adding trusted certificate: {e:?}"
+                                    ))
+                                })?;
+                            }
+                            Err(e) => {
+                                return Err(RhttpError::RhttpUnknownError(format!(
+                                    "Error parsing trusted certificate: {e:?}"
+                                )));
+                            }
+                        }
+                    }
                 }
 
-                for cert in tls_settings.trusted_root_certificates {
-                    client = client.add_root_certificate(
-                        Certificate::from_pem(&cert).map_err(|e| {
+                let config_builder =
+                    rustls::ClientConfig::builder_with_provider(Arc::new(base_provider))
+                        .with_safe_default_protocol_versions()
+                        .map_err(|e| {
+                            RhttpError::RhttpUnknownError(format!("TLS config error: {e:?}"))
+                        })?;
+
+                let config_builder = if !tls_settings.verify_certificates {
+                    config_builder
+                        .dangerous()
+                        .with_custom_certificate_verifier(Arc::new(EchNoCertVerifier))
+                } else {
+                    config_builder.with_root_certificates(root_store)
+                };
+
+                let mut tls_config =
+                    if let Some(client_certificate) = tls_settings.client_certificate {
+                        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+                            rustls_pemfile::certs(&mut client_certificate.certificate.as_slice())
+                                .filter_map(|c| c.ok())
+                                .collect();
+                        let key = rustls_pemfile::private_key(
+                            &mut client_certificate.private_key.as_slice(),
+                        )
+                        .map_err(|e| {
                             RhttpError::RhttpUnknownError(format!(
-                                "Error adding trusted certificate: {e:?}"
+                                "Error parsing client private key: {e:?}"
                             ))
-                        })?,
-                    );
-                }
+                        })?
+                        .ok_or_else(|| {
+                            RhttpError::RhttpUnknownError(
+                                "No private key found in client certificate".into(),
+                            )
+                        })?;
+                        config_builder
+                            .with_client_auth_cert(certs, key)
+                            .map_err(|e| {
+                                RhttpError::RhttpUnknownError(format!(
+                                    "Error setting client certificate: {e:?}"
+                                ))
+                            })?
+                    } else {
+                        config_builder.with_no_client_auth()
+                    };
 
-                if !tls_settings.verify_certificates {
-                    client = client.danger_accept_invalid_certs(true);
-                }
+                tls_config.enable_sni = tls_settings.sni;
 
-                if let Some(client_certificate) = tls_settings.client_certificate {
-                    let identity = &[
-                        client_certificate.certificate.as_slice(),
-                        "\n".as_bytes(),
-                        client_certificate.private_key.as_slice(),
-                    ]
-                    .concat();
+                // ALPN protocols based on HTTP version preference
+                tls_config.alpn_protocols = match settings.http_version_pref {
+                    HttpVersionPref::Http10 | HttpVersionPref::Http11 => {
+                        vec![b"http/1.1".to_vec()]
+                    }
+                    HttpVersionPref::Http2 => vec![b"h2".to_vec()],
+                    HttpVersionPref::Http3 => vec![b"h3".to_vec()],
+                    HttpVersionPref::All => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+                };
 
-                    client = client.identity(
-                        reqwest::Identity::from_pem(identity)
-                            .map_err(|e| RhttpError::RhttpUnknownError(format!("{e:?}")))?,
-                    );
-                }
-
-                if let Some(min_tls_version) = tls_settings.min_tls_version {
-                    client = client.min_tls_version(match min_tls_version {
-                        TlsVersion::Tls1_2 => tls::Version::TLS_1_2,
-                        TlsVersion::Tls1_3 => tls::Version::TLS_1_3,
-                    });
-                }
-
-                if let Some(max_tls_version) = tls_settings.max_tls_version {
-                    client = client.max_tls_version(match max_tls_version {
-                        TlsVersion::Tls1_2 => tls::Version::TLS_1_2,
-                        TlsVersion::Tls1_3 => tls::Version::TLS_1_3,
-                    });
-                }
-
-                client = client.tls_sni(tls_settings.sni);
+                client = client.use_preconfigured_tls(tls_config);
             }
         }
 
@@ -485,6 +528,33 @@ pub fn create_dynamic_resolver_sync(
     DnsSettings::DynamicDns(DynamicDnsSettings {
         resolver: Arc::new(resolver),
     })
+}
+
+/// 将 cipher suites 重排为 Chrome/BoringSSL 风格：
+/// TLS 1.3: AES_128_GCM → AES_256_GCM → CHACHA20_POLY1305
+/// TLS 1.2: ECDHE_ECDSA/RSA_AES_128_GCM → ECDHE_ECDSA/RSA_AES_256_GCM → ECDHE_ECDSA/RSA_CHACHA20
+///
+/// rustls 默认把 ChaCha20 放最前面，导致 JA3 指纹明显不同于浏览器。
+fn reorder_cipher_suites_chrome_style(
+    suites: Vec<rustls::SupportedCipherSuite>,
+) -> Vec<rustls::SupportedCipherSuite> {
+    let priority = |suite: &rustls::SupportedCipherSuite| -> u32 {
+        match suite.suite() {
+            CipherSuite::TLS13_AES_128_GCM_SHA256 => 0,
+            CipherSuite::TLS13_AES_256_GCM_SHA384 => 1,
+            CipherSuite::TLS13_CHACHA20_POLY1305_SHA256 => 2,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 => 10,
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => 11,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => 12,
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 => 13,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 => 14,
+            CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 => 15,
+            _ => 100,
+        }
+    };
+    let mut sorted = suites;
+    sorted.sort_by_key(|s| priority(s));
+    sorted
 }
 
 /// A certificate verifier that accepts any certificate (for verify_certificates: false with ECH).
