@@ -30,7 +30,9 @@ features = [
 
     # Compression
     "brotli",
+    "deflate",
     "gzip",
+    "zstd",
 ]
 
 [lints.rust]
