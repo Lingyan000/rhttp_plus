@@ -1,3 +1,7 @@
+## 0.17.0
+
+- deps: bump `reqwest` to `0.13.3` (Might be breaking! See README for Android setup) #105
+
 ## 0.16.0
 
 - deps: bump `flutter_rust_bridge` to `2.12.0`
