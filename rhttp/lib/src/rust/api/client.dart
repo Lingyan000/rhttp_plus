@@ -170,6 +170,12 @@ sealed class RedirectSettings with _$RedirectSettings {
   ) = RedirectSettings_LimitedRedirects;
 }
 
+enum RootCertSource {
+  platform,
+  webpki,
+  none,
+}
+
 class StaticDnsSettings {
   final Map<String, List<String>> overrides;
   final String? fallback;
@@ -223,7 +229,7 @@ class TimeoutSettings {
 }
 
 class TlsSettings {
-  final bool trustRootCertificates;
+  final RootCertSource rootCertSource;
   final List<Uint8List> trustedRootCertificates;
   final bool verifyCertificates;
   final ClientCertificate? clientCertificate;
@@ -232,7 +238,7 @@ class TlsSettings {
   final bool sni;
 
   const TlsSettings({
-    required this.trustRootCertificates,
+    required this.rootCertSource,
     required this.trustedRootCertificates,
     required this.verifyCertificates,
     this.clientCertificate,
@@ -243,7 +249,7 @@ class TlsSettings {
 
   @override
   int get hashCode =>
-      trustRootCertificates.hashCode ^
+      rootCertSource.hashCode ^
       trustedRootCertificates.hashCode ^
       verifyCertificates.hashCode ^
       clientCertificate.hashCode ^
@@ -256,7 +262,7 @@ class TlsSettings {
       identical(this, other) ||
       other is TlsSettings &&
           runtimeType == other.runtimeType &&
-          trustRootCertificates == other.trustRootCertificates &&
+          rootCertSource == other.rootCertSource &&
           trustedRootCertificates == other.trustedRootCertificates &&
           verifyCertificates == other.verifyCertificates &&
           clientCertificate == other.clientCertificate &&

@@ -62,6 +62,7 @@ export 'src/model/settings.dart'
         ProxyCondition,
         RedirectSettings,
         TlsSettings,
+        RootCertSource,
         ClientCertificate,
         DnsSettings;
 export 'src/model/response.dart'

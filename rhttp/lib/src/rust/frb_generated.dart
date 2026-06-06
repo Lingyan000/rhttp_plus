@@ -1810,6 +1810,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RootCertSource dco_decode_root_cert_source(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return RootCertSource.values[raw as int];
+  }
+
+  @protected
   StaticDnsSettings dco_decode_static_dns_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1842,7 +1848,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (arr.length != 7)
       throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return TlsSettings(
-      trustRootCertificates: dco_decode_bool(arr[0]),
+      rootCertSource: dco_decode_root_cert_source(arr[0]),
       trustedRootCertificates: dco_decode_list_list_prim_u_8_strict(arr[1]),
       verifyCertificates: dco_decode_bool(arr[2]),
       clientCertificate: dco_decode_opt_box_autoadd_client_certificate(arr[3]),
@@ -2906,6 +2912,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RootCertSource sse_decode_root_cert_source(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return RootCertSource.values[inner];
+  }
+
+  @protected
   StaticDnsSettings sse_decode_static_dns_settings(
     SseDeserializer deserializer,
   ) {
@@ -2939,7 +2952,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   TlsSettings sse_decode_tls_settings(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_trustRootCertificates = sse_decode_bool(deserializer);
+    var var_rootCertSource = sse_decode_root_cert_source(deserializer);
     var var_trustedRootCertificates = sse_decode_list_list_prim_u_8_strict(
       deserializer,
     );
@@ -2955,7 +2968,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_sni = sse_decode_bool(deserializer);
     return TlsSettings(
-      trustRootCertificates: var_trustRootCertificates,
+      rootCertSource: var_rootCertSource,
       trustedRootCertificates: var_trustedRootCertificates,
       verifyCertificates: var_verifyCertificates,
       clientCertificate: var_clientCertificate,
@@ -4093,6 +4106,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_root_cert_source(
+    RootCertSource self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_static_dns_settings(
     StaticDnsSettings self,
     SseSerializer serializer,
@@ -4120,7 +4142,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_tls_settings(TlsSettings self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bool(self.trustRootCertificates, serializer);
+    sse_encode_root_cert_source(self.rootCertSource, serializer);
     sse_encode_list_list_prim_u_8_strict(
       self.trustedRootCertificates,
       serializer,

@@ -69,7 +69,7 @@ Checkout the benchmark code [here](https://github.com/Tienisto/rhttp/tree/main/b
   - [TLS version](#-tls-version)
   - [TLS Server Name Indication (SNI)](#-tls-server-name-indication-sni)
   - [Certificate Pinning](#-certificate-pinning)
-  - [Disable pre-installed root certificates](#-disable-pre-installed-root-certificates)
+  - [Root certificate source](#-root-certificate-source)
   - [Client Authentication](#-client-authentication--mutual-tls)
   - [Disable certificate verification](#-disable-certificate-verification)
   - [Proxy](#-proxy)
@@ -99,46 +99,6 @@ Checkout the benchmark code [here](https://github.com/Tienisto/rhttp/tree/main/b
 dependencies:
   rhttp: <version>
 ```
-
-#### Android Configuration
-The native android side of your app must be configured specially.
-
-##### Proguard Exclusions
-By default Android's [R8 shrinker](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization) will remove any (seemingly) unused Java classes. However [`rustls-platform-verifier` needs these classes](https://github.com/rustls/rustls-platform-verifier#proguard).
-
-Therefore add a `android/app/proguard-rules.pro` file if it is not already existing and add or append the following line:
-```
--keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
-```
-If the proguard file did not exist earlier it must also be added to `android/app/build.gradle.kts`:
-```diff
- android {
-    ...
-    buildTypes {
-        release {
-            ...
-   
-+            proguardFiles(
-+                getDefaultProguardFile("proguard-android-optimize.txt"),
-+                "proguard-rules.pro"
-             )
-         }
-     }
-}
-```
-
-##### Internet Access Permission (Optional, but commonly needed)
-By default flutter only injects the `android.permission.INTERNET` in debug mode.  
-If internet is needed in *release* mode too, the following permission must be added to `android/app/src/main/AndroidManifest.xml`:
-```diff
- <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-+    <uses-permission android:name="android.permission.INTERNET"/>
-     <application
-         ...
-```
-
-##### Network Security Configuration (Optional)
-If you only want to allow access to certain endpoints, restrict the set of public CAs that the app trusts or if your app should consider *user installed certificates*, you will need a [`network_security_config.xml`](https://developer.android.com/privacy-and-security/security-config) file.
 
 ### ➤ Initialization
 
@@ -532,20 +492,56 @@ some certificate
 );
 ```
 
-### ➤ Disable pre-installed root certificates
+### ➤ Root certificate source
 
-By default, the pre-installed root certificates are used.
-You can disable this behavior by setting `trustRootCertificates` to `false`.
+By default, the root certificates provided by Mozilla (webpki) are used.
+As of now, this is the most reliable option which requires no additional setup.
+
+You can configure which root certificates are trusted by setting `TlsSettings.rootCertSource`.
+
+| Mode       | Description                                             | Notes                                                                                                   |
+|------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `platform` | Use root certificates provided by the operating system. | Flexible, but may be inconsistent across platforms.                                                     |
+| `webpki`   | Use root certificates provided by Mozilla. (default)    | Consistent across platforms, but requires manual app updates. Root certs are valid for around 15 years. |
+| `none`     | Don't trust any root certificates.                      | Special use cases                                                                                       |
 
 ```dart
 await Rhttp.get(
   'https://example.com',
   settings: const ClientSettings(
     tlsSettings: TlsSettings(
-      trustRootCertificates: false,
+      rootCertSource: RootCertSource.none,
     ),
   ),
 );
+```
+
+#### Android Proguard Exclusions (only required for `RootCertSource.platform`)
+
+The `platform` mode relies on [`rustls-platform-verifier`](https://github.com/rustls/rustls-platform-verifier#proguard),
+whose Java classes are stripped by Android's [R8 shrinker](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization)
+in release builds. The `webpki` (default) and `none` modes do not use these classes and need no Proguard configuration.
+
+If you use `RootCertSource.platform`, add a `android/app/proguard-rules.pro` file if it does not already exist
+and add or append the following line:
+```
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
+```
+If the proguard file did not exist earlier it must also be added to `android/app/build.gradle.kts`:
+```diff
+ android {
+    ...
+    buildTypes {
+        release {
+            ...
+   
++            proguardFiles(
++                getDefaultProguardFile("proguard-android-optimize.txt"),
++                "proguard-rules.pro"
+             )
+         }
+     }
+}
 ```
 
 ### ➤ Client Authentication / mutual TLS

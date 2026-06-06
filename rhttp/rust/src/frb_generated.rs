@@ -1565,6 +1565,19 @@ impl SseDecode for crate::api::error::RhttpError {
     }
 }
 
+impl SseDecode for crate::api::client::RootCertSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::client::RootCertSource::Platform,
+            1 => crate::api::client::RootCertSource::Webpki,
+            2 => crate::api::client::RootCertSource::None,
+            _ => unreachable!("Invalid variant for RootCertSource: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::client::StaticDnsSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1597,7 +1610,7 @@ impl SseDecode for crate::api::client::TimeoutSettings {
 impl SseDecode for crate::api::client::TlsSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_trustRootCertificates = <bool>::sse_decode(deserializer);
+        let mut var_rootCertSource = <crate::api::client::RootCertSource>::sse_decode(deserializer);
         let mut var_trustedRootCertificates = <Vec<Vec<u8>>>::sse_decode(deserializer);
         let mut var_verifyCertificates = <bool>::sse_decode(deserializer);
         let mut var_clientCertificate =
@@ -1608,7 +1621,7 @@ impl SseDecode for crate::api::client::TlsSettings {
             <Option<crate::api::client::TlsVersion>>::sse_decode(deserializer);
         let mut var_sni = <bool>::sse_decode(deserializer);
         return crate::api::client::TlsSettings {
-            trust_root_certificates: var_trustRootCertificates,
+            root_cert_source: var_rootCertSource,
             trusted_root_certificates: var_trustedRootCertificates,
             verify_certificates: var_verifyCertificates,
             client_certificate: var_clientCertificate,
@@ -2258,6 +2271,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::error::RhttpError>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::client::RootCertSource {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Platform => 0.into_dart(),
+            Self::Webpki => 1.into_dart(),
+            Self::None => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::client::RootCertSource
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::client::RootCertSource>
+    for crate::api::client::RootCertSource
+{
+    fn into_into_dart(self) -> crate::api::client::RootCertSource {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::client::StaticDnsSettings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -2305,7 +2340,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::client::TimeoutSettings>
 impl flutter_rust_bridge::IntoDart for crate::api::client::TlsSettings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.trust_root_certificates.into_into_dart().into_dart(),
+            self.root_cert_source.into_into_dart().into_dart(),
             self.trusted_root_certificates.into_into_dart().into_dart(),
             self.verify_certificates.into_into_dart().into_dart(),
             self.client_certificate.into_into_dart().into_dart(),
@@ -3117,6 +3152,23 @@ impl SseEncode for crate::api::error::RhttpError {
     }
 }
 
+impl SseEncode for crate::api::client::RootCertSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::client::RootCertSource::Platform => 0,
+                crate::api::client::RootCertSource::Webpki => 1,
+                crate::api::client::RootCertSource::None => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::client::StaticDnsSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3138,7 +3190,7 @@ impl SseEncode for crate::api::client::TimeoutSettings {
 impl SseEncode for crate::api::client::TlsSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.trust_root_certificates, serializer);
+        <crate::api::client::RootCertSource>::sse_encode(self.root_cert_source, serializer);
         <Vec<Vec<u8>>>::sse_encode(self.trusted_root_certificates, serializer);
         <bool>::sse_encode(self.verify_certificates, serializer);
         <Option<crate::api::client::ClientCertificate>>::sse_encode(

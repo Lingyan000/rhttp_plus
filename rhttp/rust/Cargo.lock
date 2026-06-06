@@ -1561,6 +1561,7 @@ dependencies = [
  "rustls-platform-verifier",
  "tokio",
  "tokio-util",
+ "webpki-root-certs",
 ]
 
 [[package]]

@@ -56,13 +56,19 @@ pub struct TimeoutSettings {
 }
 
 pub struct TlsSettings {
-    pub trust_root_certificates: bool,
+    pub root_cert_source: RootCertSource,
     pub trusted_root_certificates: Vec<Vec<u8>>,
     pub verify_certificates: bool,
     pub client_certificate: Option<ClientCertificate>,
     pub min_tls_version: Option<TlsVersion>,
     pub max_tls_version: Option<TlsVersion>,
     pub sni: bool,
+}
+
+pub enum RootCertSource {
+    Platform,
+    Webpki,
+    None,
 }
 
 pub enum DnsSettings {
@@ -198,27 +204,34 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
         }
 
         if let Some(tls_settings) = settings.tls_settings {
-            let certificates = tls_settings.trusted_root_certificates.iter().map(|cert| {
-                Certificate::from_pem(&cert).map_err(|e| {
-                    RhttpError::RhttpUnknownError(format!(
-                        "Error adding trusted certificate: {e:?}"
-                    ))
-                })
-            }).collect::<Result<Vec<Certificate>, RhttpError>>()?;
-
-            if !tls_settings.trust_root_certificates {
-                client = client.tls_certs_only(certificates);
-            } else {
-                client = client.tls_certs_merge(certificates);
-            }
-
-            for cert in tls_settings.trusted_root_certificates {
-                client =
-                    client.add_root_certificate(Certificate::from_pem(&cert).map_err(|e| {
+            // Caller-supplied custom roots (PEM), always layered on top.
+            let custom_certs = tls_settings
+                .trusted_root_certificates
+                .iter()
+                .map(|cert| {
+                    Certificate::from_pem(cert).map_err(|e| {
                         RhttpError::RhttpUnknownError(format!(
                             "Error adding trusted certificate: {e:?}"
                         ))
-                    })?);
+                    })
+                })
+                .collect::<Result<Vec<Certificate>, RhttpError>>()?;
+
+            match tls_settings.root_cert_source {
+                RootCertSource::Platform => {
+                    // Add custom certs if not empty, otherwise, keep platform verifier as is
+                    if !custom_certs.is_empty() {
+                        client = client.tls_certs_merge(custom_certs);
+                    }
+                }
+                RootCertSource::Webpki => {
+                    let mut certs = custom_certs;
+                    certs.extend(webpki_root_certs()?);
+                    client = client.tls_certs_only(certs);
+                }
+                RootCertSource::None => {
+                    client = client.tls_certs_only(custom_certs);
+                }
             }
 
             if !tls_settings.verify_certificates {
@@ -254,6 +267,9 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
             }
 
             client = client.tls_sni(tls_settings.sni);
+        } else {
+            // No TLS settings supplied: respect the default root cert source (Webpki).
+            client = client.tls_certs_only(webpki_root_certs()?);
         }
 
         client = match settings.http_version_pref {
@@ -319,6 +335,18 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
         throw_on_status_code: settings.throw_on_status_code,
         cancel_token: CancellationToken::new(),
     })
+}
+
+/// The webpki (Mozilla) root certificates bundled with the crate.
+fn webpki_root_certs() -> Result<Vec<Certificate>, RhttpError> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .map(|der| {
+            Certificate::from_der(der.as_ref()).map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error adding webpki root: {e:?}"))
+            })
+        })
+        .collect()
 }
 
 struct StaticResolver {

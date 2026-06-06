@@ -400,6 +400,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RhttpError dco_decode_rhttp_error(dynamic raw);
 
   @protected
+  RootCertSource dco_decode_root_cert_source(dynamic raw);
+
+  @protected
   StaticDnsSettings dco_decode_static_dns_settings(dynamic raw);
 
   @protected
@@ -809,6 +812,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RhttpError sse_decode_rhttp_error(SseDeserializer deserializer);
+
+  @protected
+  RootCertSource sse_decode_root_cert_source(SseDeserializer deserializer);
 
   @protected
   StaticDnsSettings sse_decode_static_dns_settings(
@@ -1357,6 +1363,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_rhttp_error(RhttpError self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_root_cert_source(
+    RootCertSource self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_static_dns_settings(
