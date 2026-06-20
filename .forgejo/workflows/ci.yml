@@ -8,7 +8,7 @@ on:
 
 env:
   FLUTTER_VERSION_OLDEST: "3.35.7"
-  FLUTTER_VERSION_NEWEST: "3.38.9"
+  FLUTTER_VERSION_NEWEST: "3.41.9"
 
 defaults:
   run:

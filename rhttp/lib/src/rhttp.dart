@@ -13,7 +13,11 @@ class Rhttp {
 
   /// Initializes the Rust library.
   static Future<void> init() async {
-    await RustLib.init();
+    await RustLib.init(
+      // Reduce the probably of dependency hell.
+      // Projects using rhttp may use frb for other purposes as well.
+      forceSameCodegenVersion: false,
+    );
   }
 
   /// Makes an HTTP request.

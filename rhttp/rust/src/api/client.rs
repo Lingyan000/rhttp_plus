@@ -57,7 +57,7 @@ pub struct TimeoutSettings {
 }
 
 pub struct TlsSettings {
-    pub trust_root_certificates: bool,
+    pub root_cert_source: RootCertSource,
     pub trusted_root_certificates: Vec<Vec<u8>>,
     pub verify_certificates: bool,
     pub client_certificate: Option<ClientCertificate>,
@@ -68,6 +68,12 @@ pub struct TlsSettings {
     pub ech_config_list: Option<Vec<u8>>,
     /// Enable ECH GREASE when no ECH config is available.
     pub ech_grease: bool,
+}
+
+pub enum RootCertSource {
+    Platform,
+    Webpki,
+    None,
 }
 
 pub enum DnsSettings {
@@ -203,212 +209,20 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
         }
 
         if let Some(tls_settings) = settings.tls_settings {
-            let ech_enabled =
-                tls_settings.ech_config_list.is_some() || tls_settings.ech_grease;
+            let ech_enabled = tls_settings.ech_config_list.is_some() || tls_settings.ech_grease;
 
-            if ech_enabled {
-                // Build rustls::ClientConfig manually with ECH support
-                let mut base_provider = rustls::crypto::aws_lc_rs::default_provider();
-                // cipher suite 顺序对齐 Chrome/BoringSSL，降低被 CF Bot Management 标记的风险
-                base_provider.cipher_suites =
-                    reorder_cipher_suites_chrome_style(base_provider.cipher_suites);
-                let provider = Arc::new(base_provider);
-
-                let ech_mode = if let Some(ref config_list) = tls_settings.ech_config_list {
-                    let ech_config = rustls::client::EchConfig::new(
-                        rustls::pki_types::EchConfigListBytes::from(config_list.clone()),
-                        rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
-                    )
-                    .map_err(|e| {
-                        RhttpError::RhttpUnknownError(format!("ECH config error: {e:?}"))
-                    })?;
-                    rustls::client::EchMode::Enable(ech_config)
-                } else {
-                    let suite = rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES
-                        .first()
-                        .ok_or_else(|| {
-                            RhttpError::RhttpUnknownError(
-                                "No HPKE suites available for ECH GREASE".into(),
-                            )
-                        })?;
-                    rustls::client::EchMode::Grease(rustls::client::EchGreaseConfig::new(
-                        *suite,
-                        rustls::crypto::hpke::HpkePublicKey(vec![1u8; 32]),
-                    ))
-                };
-
-                let config_builder = rustls::ClientConfig::builder_with_provider(provider.clone())
-                    .with_ech(ech_mode)
-                    .map_err(|e| {
-                        RhttpError::RhttpUnknownError(format!("ECH setup error: {e:?}"))
-                    })?;
-
-                // Root certificate store
-                let mut root_store = rustls::RootCertStore::empty();
-                if tls_settings.trust_root_certificates {
-                    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-                }
-                for cert_pem in &tls_settings.trusted_root_certificates {
-                    for cert in rustls_pemfile::certs(&mut cert_pem.as_slice()) {
-                        match cert {
-                            Ok(c) => {
-                                root_store.add(c).map_err(|e| {
-                                    RhttpError::RhttpUnknownError(format!(
-                                        "Error adding trusted certificate: {e:?}"
-                                    ))
-                                })?;
-                            }
-                            Err(e) => {
-                                return Err(RhttpError::RhttpUnknownError(format!(
-                                    "Error parsing trusted certificate: {e:?}"
-                                )));
-                            }
-                        }
-                    }
-                }
-
-                // Certificate verification
-                let config_builder = if !tls_settings.verify_certificates {
-                    config_builder
-                        .dangerous()
-                        .with_custom_certificate_verifier(Arc::new(EchNoCertVerifier))
-                } else {
-                    config_builder.with_root_certificates(root_store)
-                };
-
-                // Client authentication
-                let mut tls_config =
-                    if let Some(client_certificate) = tls_settings.client_certificate {
-                        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
-                            rustls_pemfile::certs(&mut client_certificate.certificate.as_slice())
-                                .filter_map(|c| c.ok())
-                                .collect();
-                        let key = rustls_pemfile::private_key(
-                            &mut client_certificate.private_key.as_slice(),
-                        )
-                        .map_err(|e| {
-                            RhttpError::RhttpUnknownError(format!(
-                                "Error parsing client private key: {e:?}"
-                            ))
-                        })?
-                        .ok_or_else(|| {
-                            RhttpError::RhttpUnknownError(
-                                "No private key found in client certificate".into(),
-                            )
-                        })?;
-                        config_builder
-                            .with_client_auth_cert(certs, key)
-                            .map_err(|e| {
-                                RhttpError::RhttpUnknownError(format!(
-                                    "Error setting client certificate: {e:?}"
-                                ))
-                            })?
-                    } else {
-                        config_builder.with_no_client_auth()
-                    };
-
-                tls_config.enable_sni = tls_settings.sni;
-
-                // ALPN protocols based on HTTP version preference
-                tls_config.alpn_protocols = match settings.http_version_pref {
-                    HttpVersionPref::Http10 | HttpVersionPref::Http11 => {
-                        vec![b"http/1.1".to_vec()]
-                    }
-                    HttpVersionPref::Http2 => vec![b"h2".to_vec()],
-                    HttpVersionPref::Http3 => vec![b"h3".to_vec()],
-                    HttpVersionPref::All => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
-                };
-
-                client = client.use_preconfigured_tls(tls_config);
+            if ech_enabled || !matches!(&tls_settings.root_cert_source, RootCertSource::Platform) {
+                client = client.use_preconfigured_tls(build_rustls_config(
+                    &tls_settings,
+                    settings.http_version_pref,
+                    ech_enabled,
+                )?);
             } else {
-                // Standard TLS configuration (no ECH)
-                // 使用 use_preconfigured_tls 以自定义 cipher suite 顺序（对齐 Chrome）
-                let mut base_provider = rustls::crypto::ring::default_provider();
-                base_provider.cipher_suites =
-                    reorder_cipher_suites_chrome_style(base_provider.cipher_suites);
-
-                let mut root_store = rustls::RootCertStore::empty();
-                if tls_settings.trust_root_certificates {
-                    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-                }
-                for cert_pem in &tls_settings.trusted_root_certificates {
-                    for cert in rustls_pemfile::certs(&mut cert_pem.as_slice()) {
-                        match cert {
-                            Ok(c) => {
-                                root_store.add(c).map_err(|e| {
-                                    RhttpError::RhttpUnknownError(format!(
-                                        "Error adding trusted certificate: {e:?}"
-                                    ))
-                                })?;
-                            }
-                            Err(e) => {
-                                return Err(RhttpError::RhttpUnknownError(format!(
-                                    "Error parsing trusted certificate: {e:?}"
-                                )));
-                            }
-                        }
-                    }
-                }
-
-                let config_builder =
-                    rustls::ClientConfig::builder_with_provider(Arc::new(base_provider))
-                        .with_safe_default_protocol_versions()
-                        .map_err(|e| {
-                            RhttpError::RhttpUnknownError(format!("TLS config error: {e:?}"))
-                        })?;
-
-                let config_builder = if !tls_settings.verify_certificates {
-                    config_builder
-                        .dangerous()
-                        .with_custom_certificate_verifier(Arc::new(EchNoCertVerifier))
-                } else {
-                    config_builder.with_root_certificates(root_store)
-                };
-
-                let mut tls_config =
-                    if let Some(client_certificate) = tls_settings.client_certificate {
-                        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
-                            rustls_pemfile::certs(&mut client_certificate.certificate.as_slice())
-                                .filter_map(|c| c.ok())
-                                .collect();
-                        let key = rustls_pemfile::private_key(
-                            &mut client_certificate.private_key.as_slice(),
-                        )
-                        .map_err(|e| {
-                            RhttpError::RhttpUnknownError(format!(
-                                "Error parsing client private key: {e:?}"
-                            ))
-                        })?
-                        .ok_or_else(|| {
-                            RhttpError::RhttpUnknownError(
-                                "No private key found in client certificate".into(),
-                            )
-                        })?;
-                        config_builder
-                            .with_client_auth_cert(certs, key)
-                            .map_err(|e| {
-                                RhttpError::RhttpUnknownError(format!(
-                                    "Error setting client certificate: {e:?}"
-                                ))
-                            })?
-                    } else {
-                        config_builder.with_no_client_auth()
-                    };
-
-                tls_config.enable_sni = tls_settings.sni;
-
-                // ALPN protocols based on HTTP version preference
-                tls_config.alpn_protocols = match settings.http_version_pref {
-                    HttpVersionPref::Http10 | HttpVersionPref::Http11 => {
-                        vec![b"http/1.1".to_vec()]
-                    }
-                    HttpVersionPref::Http2 => vec![b"h2".to_vec()],
-                    HttpVersionPref::Http3 => vec![b"h3".to_vec()],
-                    HttpVersionPref::All => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
-                };
-
-                client = client.use_preconfigured_tls(tls_config);
+                client = apply_reqwest_tls_settings(client, &tls_settings)?;
             }
+        } else {
+            // No TLS settings supplied: respect the default root cert source (Webpki).
+            client = client.tls_certs_only(webpki_root_certs()?);
         }
 
         client = match settings.http_version_pref {
@@ -474,6 +288,227 @@ fn create_client(settings: ClientSettings) -> Result<RequestClient, RhttpError> 
         throw_on_status_code: settings.throw_on_status_code,
         cancel_token: CancellationToken::new(),
     })
+}
+
+/// The webpki (Mozilla) root certificates bundled with the crate.
+fn webpki_root_certs() -> Result<Vec<Certificate>, RhttpError> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .map(|der| {
+            Certificate::from_der(der.as_ref()).map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error adding webpki root: {e:?}"))
+            })
+        })
+        .collect()
+}
+
+fn build_reqwest_custom_certs(tls_settings: &TlsSettings) -> Result<Vec<Certificate>, RhttpError> {
+    tls_settings
+        .trusted_root_certificates
+        .iter()
+        .map(|cert| {
+            Certificate::from_pem(cert).map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error adding trusted certificate: {e:?}"))
+            })
+        })
+        .collect()
+}
+
+fn apply_reqwest_tls_settings(
+    mut client: reqwest::ClientBuilder,
+    tls_settings: &TlsSettings,
+) -> Result<reqwest::ClientBuilder, RhttpError> {
+    let custom_certs = build_reqwest_custom_certs(tls_settings)?;
+
+    match &tls_settings.root_cert_source {
+        RootCertSource::Platform => {
+            if !custom_certs.is_empty() {
+                client = client.tls_certs_merge(custom_certs);
+            }
+        }
+        RootCertSource::Webpki => {
+            let mut certs = custom_certs;
+            certs.extend(webpki_root_certs()?);
+            client = client.tls_certs_only(certs);
+        }
+        RootCertSource::None => {
+            client = client.tls_certs_only(custom_certs);
+        }
+    }
+
+    if !tls_settings.verify_certificates {
+        client = client.danger_accept_invalid_certs(true);
+    }
+
+    if let Some(client_certificate) = &tls_settings.client_certificate {
+        let identity = &[
+            client_certificate.certificate.as_slice(),
+            "\n".as_bytes(),
+            client_certificate.private_key.as_slice(),
+        ]
+        .concat();
+
+        client = client.identity(
+            reqwest::Identity::from_pem(identity)
+                .map_err(|e| RhttpError::RhttpUnknownError(format!("{e:?}")))?,
+        );
+    }
+
+    if let Some(min_tls_version) = &tls_settings.min_tls_version {
+        client = client.min_tls_version(match min_tls_version {
+            TlsVersion::Tls1_2 => tls::Version::TLS_1_2,
+            TlsVersion::Tls1_3 => tls::Version::TLS_1_3,
+        });
+    }
+
+    if let Some(max_tls_version) = &tls_settings.max_tls_version {
+        client = client.max_tls_version(match max_tls_version {
+            TlsVersion::Tls1_2 => tls::Version::TLS_1_2,
+            TlsVersion::Tls1_3 => tls::Version::TLS_1_3,
+        });
+    }
+
+    Ok(client.tls_sni(tls_settings.sni))
+}
+
+fn build_rustls_config(
+    tls_settings: &TlsSettings,
+    http_version_pref: HttpVersionPref,
+    ech_enabled: bool,
+) -> Result<rustls::ClientConfig, RhttpError> {
+    let mut base_provider = rustls::crypto::aws_lc_rs::default_provider();
+    base_provider.cipher_suites = reorder_cipher_suites_chrome_style(base_provider.cipher_suites);
+    let provider = Arc::new(base_provider);
+
+    let config_builder = if ech_enabled {
+        rustls::ClientConfig::builder_with_provider(provider)
+            .with_ech(build_ech_mode(tls_settings)?)
+            .map_err(|e| RhttpError::RhttpUnknownError(format!("ECH setup error: {e:?}")))?
+    } else {
+        rustls::ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(&rustls_protocol_versions(tls_settings)?)
+            .map_err(|e| RhttpError::RhttpUnknownError(format!("TLS config error: {e:?}")))?
+    };
+
+    let root_store = build_rustls_root_store(tls_settings)?;
+    let config_builder = if !tls_settings.verify_certificates {
+        config_builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(EchNoCertVerifier))
+    } else {
+        config_builder.with_root_certificates(root_store)
+    };
+
+    let mut tls_config = if let Some(client_certificate) = &tls_settings.client_certificate {
+        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut client_certificate.certificate.as_slice())
+                .filter_map(|c| c.ok())
+                .collect();
+        let key = rustls_pemfile::private_key(&mut client_certificate.private_key.as_slice())
+            .map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error parsing client private key: {e:?}"))
+            })?
+            .ok_or_else(|| {
+                RhttpError::RhttpUnknownError("No private key found in client certificate".into())
+            })?;
+        config_builder
+            .with_client_auth_cert(certs, key)
+            .map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error setting client certificate: {e:?}"))
+            })?
+    } else {
+        config_builder.with_no_client_auth()
+    };
+
+    tls_config.enable_sni = tls_settings.sni;
+    tls_config.alpn_protocols = alpn_protocols(http_version_pref);
+    Ok(tls_config)
+}
+
+fn build_ech_mode(tls_settings: &TlsSettings) -> Result<rustls::client::EchMode, RhttpError> {
+    if let Some(config_list) = &tls_settings.ech_config_list {
+        let ech_config = rustls::client::EchConfig::new(
+            rustls::pki_types::EchConfigListBytes::from(config_list.clone()),
+            rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
+        )
+        .map_err(|e| RhttpError::RhttpUnknownError(format!("ECH config error: {e:?}")))?;
+        return Ok(rustls::client::EchMode::Enable(ech_config));
+    }
+
+    let suite = rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES
+        .first()
+        .ok_or_else(|| {
+            RhttpError::RhttpUnknownError("No HPKE suites available for ECH GREASE".into())
+        })?;
+    Ok(rustls::client::EchMode::Grease(
+        rustls::client::EchGreaseConfig::new(
+            *suite,
+            rustls::crypto::hpke::HpkePublicKey(vec![1u8; 32]),
+        ),
+    ))
+}
+
+fn build_rustls_root_store(
+    tls_settings: &TlsSettings,
+) -> Result<rustls::RootCertStore, RhttpError> {
+    let mut root_store = rustls::RootCertStore::empty();
+
+    match &tls_settings.root_cert_source {
+        RootCertSource::Platform | RootCertSource::Webpki => {
+            for cert in webpki_root_certs::TLS_SERVER_ROOT_CERTS {
+                root_store.add(cert.clone()).map_err(|e| {
+                    RhttpError::RhttpUnknownError(format!("Error adding webpki root: {e:?}"))
+                })?;
+            }
+        }
+        RootCertSource::None => {}
+    }
+
+    add_custom_rustls_roots(&mut root_store, &tls_settings.trusted_root_certificates)?;
+    Ok(root_store)
+}
+
+fn add_custom_rustls_roots(
+    root_store: &mut rustls::RootCertStore,
+    certs: &[Vec<u8>],
+) -> Result<(), RhttpError> {
+    for cert_pem in certs {
+        for cert in rustls_pemfile::certs(&mut cert_pem.as_slice()) {
+            let cert = cert.map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error parsing trusted certificate: {e:?}"))
+            })?;
+            root_store.add(cert).map_err(|e| {
+                RhttpError::RhttpUnknownError(format!("Error adding trusted certificate: {e:?}"))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn alpn_protocols(http_version_pref: HttpVersionPref) -> Vec<Vec<u8>> {
+    match http_version_pref {
+        HttpVersionPref::Http10 | HttpVersionPref::Http11 => vec![b"http/1.1".to_vec()],
+        HttpVersionPref::Http2 => vec![b"h2".to_vec()],
+        HttpVersionPref::Http3 => vec![b"h3".to_vec()],
+        HttpVersionPref::All => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+    }
+}
+
+fn rustls_protocol_versions(
+    tls_settings: &TlsSettings,
+) -> Result<Vec<&'static rustls::SupportedProtocolVersion>, RhttpError> {
+    let versions = match (&tls_settings.min_tls_version, &tls_settings.max_tls_version) {
+        (Some(TlsVersion::Tls1_3), Some(TlsVersion::Tls1_2)) => {
+            return Err(RhttpError::RhttpUnknownError(
+                "Invalid TLS version range: minimum TLS 1.3 is greater than maximum TLS 1.2".into(),
+            ));
+        }
+        (Some(TlsVersion::Tls1_3), _) => vec![&rustls::version::TLS13],
+        (_, Some(TlsVersion::Tls1_2)) => vec![&rustls::version::TLS12],
+        _ => vec![&rustls::version::TLS13, &rustls::version::TLS12],
+    };
+
+    Ok(versions)
 }
 
 struct StaticResolver {

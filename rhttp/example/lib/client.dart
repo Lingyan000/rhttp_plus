@@ -37,8 +37,7 @@ class _MyAppState extends State<MyApp> {
                     _client ??= await RhttpClient.create();
 
                     final res = await _client!.get(
-                      'https://reqres.in/api/users',
-                      query: {'page': '5'},
+                      'https://api.restful-api.dev/objects',
                     );
                     setState(() {
                       response = res;

@@ -222,8 +222,9 @@ class LimitedRedirects extends RedirectSettings {
 /// TLS settings for the client.
 /// Used to configure HTTPS connections.
 class TlsSettings {
-  /// Trust the root certificates that are pre-installed on the system.
-  final bool trustRootCertificates;
+  /// Policy for trusting root certificates.
+  /// Defaults to [RootCertSource.webpki].
+  final RootCertSource rootCertSource;
 
   /// The trusted root certificates in PEM format.
   /// Either specify the root certificate or the full
@@ -261,7 +262,7 @@ class TlsSettings {
   final bool echGrease;
 
   const TlsSettings({
-    this.trustRootCertificates = true,
+    this.rootCertSource = RootCertSource.webpki,
     this.trustedRootCertificates = const [],
     this.verifyCertificates = true,
     this.clientCertificate,
@@ -271,6 +272,19 @@ class TlsSettings {
     this.echConfigList,
     this.echGrease = false,
   });
+}
+
+enum RootCertSource {
+  /// Use the root certificates provided by the operating system.
+  platform,
+
+  /// Use the root certificates provided by Mozilla.
+  webpki,
+
+  /// Don't trust any root certificates.
+  /// Should be used in combination with [trustedRootCertificates]
+  /// to specify custom root certificates.
+  none,
 }
 
 /// A client certificate for client authentication / mutual TLS.
@@ -444,7 +458,7 @@ extension on TimeoutSettings {
 extension on TlsSettings {
   rust_client.TlsSettings _toRustType() {
     return rust_client.TlsSettings(
-      trustRootCertificates: trustRootCertificates,
+      rootCertSource: rootCertSource._toRustType(),
       trustedRootCertificates: trustedRootCertificates
           .map((e) => Uint8List.fromList(e.codeUnits))
           .toList(),
@@ -456,6 +470,16 @@ extension on TlsSettings {
       echConfigList: echConfigList,
       echGrease: echGrease,
     );
+  }
+}
+
+extension on RootCertSource {
+  rust_client.RootCertSource _toRustType() {
+    return switch (this) {
+      RootCertSource.platform => rust_client.RootCertSource.platform,
+      RootCertSource.webpki => rust_client.RootCertSource.webpki,
+      RootCertSource.none => rust_client.RootCertSource.none,
+    };
   }
 }
 

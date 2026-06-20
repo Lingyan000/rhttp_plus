@@ -34,11 +34,7 @@ class _MyAppState extends State<MyApp> {
                 onPressed: () async {
                   try {
                     final res = await Rhttp.get(
-                      'https://reqres.in/api/users',
-                      query: {'page': '5'},
-                      headers: const HttpHeaders.rawMap({
-                        'x-api-key': 'reqres-free-v1',
-                      }),
+                      'https://api.restful-api.dev/objects',
                       settings: const ClientSettings(
                         httpVersionPref: HttpVersionPref.http3,
                       ),
